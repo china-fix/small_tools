@@ -21,7 +21,7 @@ def download_and_save_protein_sequences(gene_ids, organism, output_filename, del
             try:
                 handle = Entrez.esearch(db="protein", term=term)
                 break
-            except  urllib.error.HTTPError:
+            except  :
                 print("HTTPError encountered during esearch. Waiting for {} seconds before retrying.".format(delay))
                 time.sleep(delay)
 
