@@ -24,6 +24,33 @@ from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 import pandas as pd
+import logging
+
+def setup_logger(log_file):
+    # Create logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Create console handler and set level to INFO
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+
+    # Create file handler and set level to INFO
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Add formatter to console handler and file handler
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    # Add console handler and file handler to logger
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Xiao_Fei_Robot: Local BLAST and Sequence Analysis Tool")
@@ -210,15 +237,12 @@ def main():
     # Create a log file path
     log_file = os.path.join(output_folder, "logfile.txt")
     
-    # Print the command used to both terminal and log file
+    # Setup logger to output to both console and file
+    logger = setup_logger(log_file)
+
+   # Log the command used
     command_used = " ".join(sys.argv)
-    # print("Command used:", command_used)
-    with open(log_file, 'a') as f:
-        print("Command used:", command_used, file=f)
-    
-    # Redirect stdout and stderr to the log file
-    sys.stdout = open(log_file, 'a')
-    sys.stderr = open(log_file, 'a')
+    logger.info("Command used: %s", command_used)
 
 
     # Perform BLAST search and analysis
