@@ -214,11 +214,27 @@ def generate_summary(output_file, blast_type):
 
 
 ### quick_see module is use to analysis the _sum.csv, summarized the matched gene distribution
-def quick_see(input, output_file):
+def quick_see(input, output_file, query_file):
     df_one_match_each_queryfile = input.groupby(['query_id', 'subject_file'], as_index=False).apply(lambda x: x.sort_values('alignment_identity', ascending=False).iloc[0])
     result = df_one_match_each_queryfile.groupby(['query_id','seq'])['is_pseudo'].apply(lambda x: x.value_counts()).reset_index(name='count')
-    result.to_csv(output_file+"_quicksee.csv")
-    return result
+    
+    try:
+        subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
+    except FileNotFoundError:
+        print("Error: seqkit is not installed or not found in the system path.")
+        print("Please install seqkit to perform sequence analysis.")
+        sys.exit(1)
+
+    cmd = 'seqkit fx2tab ' + query_file + ' > ' + output_file + '_query_file.tab'
+    os.system(cmd)
+    query_df = pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)
+    result_merge = query_df.merge(result, on='query_id', how='outer')
+    result_merge.to_csv(output_file+"_quicksee.csv")
+
+    T=result_merge.groupby(['query_id','level_2'])['count'].sum().reset_index
+    T.to_csv(output_file+"_quicksee_1.csv")
+
+    return result_merge
 
 
 
@@ -258,7 +274,7 @@ def main():
         print("hey xiao, i am doing advance module now!")
         if args.xiao_dev == 'quick_see':
             print("run quick_see module now!")
-            quick_see(tab_df, output_file)
+            quick_see(tab_df, output_file, query_file=args.query)
         else:
             print("hey xiao, no match to you advance function!")
     print('THE END')
