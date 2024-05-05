@@ -209,6 +209,7 @@ def generate_summary(output_file, blast_type):
     if blast_type == 'blastp' or blast_type == 'tblastn':
         tab_df['is_pseudo'] = tab_df['seq'].apply(is_pseudo_sequence)
     tab_df.to_csv(output_file + "_SUM" + ".csv")
+    tab_df.to_pickle(output_file + "_SUM" + ".pickle")
     return tab_df
 
 
@@ -229,7 +230,9 @@ def quick_see(input, output_file, query_file):
     os.system(cmd)
     query_df = pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)
     result_merge = query_df.merge(result, on='query_id', how='outer')
+    result_merge['level_2'].fillna('absent', inplace=True)
     result_merge.to_csv(output_file+"_quicksee.csv")
+    result_merge.to_pickle(output_file+"_quicksee.pickle")
 
     T=result_merge.groupby(['query_id','level_2'])['count'].sum().reset_index()
     T.to_csv(output_file+"_quicksee_1.csv")
