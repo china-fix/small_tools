@@ -231,7 +231,7 @@ def quick_see(input, output_file, query_file):
     result_merge = query_df.merge(result, on='query_id', how='outer')
     result_merge.to_csv(output_file+"_quicksee.csv")
 
-    T=result_merge.groupby(['query_id','level_2'])['count'].sum().reset_index
+    T=result_merge.groupby(['query_id','level_2'])['count'].sum().reset_index()
     T.to_csv(output_file+"_quicksee_1.csv")
 
     return result_merge
