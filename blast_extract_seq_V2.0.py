@@ -25,6 +25,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 import pandas as pd
 import logging
+from itertools import product
 
 
 def setup_logger(log_file):
@@ -192,7 +193,7 @@ def is_pseudo_sequence(aligned_sequence):
 
     return pseudo_status
 
-from itertools import product
+
 def generate_summary(output_file, blast_type, reference_folder,query_file):
     try:
         subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
@@ -240,7 +241,7 @@ def generate_summary(output_file, blast_type, reference_folder,query_file):
 
 
 ### quick_see module is use to analysis the _sum.csv, summarized the matched gene distribution
-def quick_see(input, output_file, query_file):
+def quick_see(input, output_file):
     df_one_match_each_queryfile = input.groupby(['query_id', 'subject_file'], as_index=False).apply(lambda x: x.sort_values('alignment_identity', ascending=False).iloc[0])
     result = df_one_match_each_queryfile.groupby(['query_id','seq'])['is_pseudo'].apply(lambda x: x.value_counts()).reset_index(name='count')
     
@@ -254,25 +255,24 @@ def quick_see(input, output_file, query_file):
     
     result['total_subject_count'] = result.groupby(['query_id'])['count'].transform('sum')
     result['percentage'] = (result['count'] / result['total_subject_count'])
-    # try:
-    #     subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
-    # except FileNotFoundError:
-    #     print("Error: seqkit is not installed or not found in the system path.")
-    #     print("Please install seqkit to perform sequence analysis.")
-    #     sys.exit(1)
-
-    # cmd = 'seqkit fx2tab ' + query_file + ' > ' + output_file + '_query_file.tab'
-    # os.system(cmd)
-    # query_df = pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)
-    # result_merge = query_df.merge(result, on='query_id', how='outer')
-    # result_merge['level_2'].fillna('absent', inplace=True)
+    
     result.to_csv(output_file+"_quicksee.csv")
     result.to_pickle(output_file+"_quicksee.pickle")
 
+
+
     T=result.groupby(['query_id','level_2'])[['count','percentage']].sum().reset_index()
     T.to_csv(output_file+"_quicksee_1.csv")
+
     K=result.groupby(['query_id','mutation'])[['count','percentage']].sum().reset_index()
-    K.to_csv(output_file+"_quicksee_2.csv")
+    query_id =K['query_id'].unique()
+    mutation =['Absent','Pseudo','Intact']
+    link=list(product(query_id,mutation))
+    df_link =  pd.DataFrame(link, columns=['query_id','mutation'])
+    new_K= pd.merge(df_link,K, on=['query_id','mutation'], how='left')
+    new_K.fillna(0, inplace=True)
+
+    new_K.to_csv(output_file+"_quicksee_2.csv")
 
     return result
 
@@ -314,7 +314,7 @@ def main():
         print("hey xiao, i am doing advance module now!")
         if args.xiao_dev == 'quick_see':
             print("run quick_see module now!")
-            quick_see(tab_df, output_file, query_file=args.query)
+            quick_see(tab_df, output_file)
         else:
             print("hey xiao, no match to you advance function!")
     print('THE END')
