@@ -26,6 +26,7 @@ from Bio.Seq import Seq
 import pandas as pd
 import logging
 
+
 def setup_logger(log_file):
     # Create logger
     logger = logging.getLogger()
@@ -191,8 +192,8 @@ def is_pseudo_sequence(aligned_sequence):
 
     return pseudo_status
 
-
-def generate_summary(output_file, blast_type):
+from itertools import product
+def generate_summary(output_file, blast_type, reference_folder,query_file):
     try:
         subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
     except FileNotFoundError:
@@ -203,22 +204,6 @@ def generate_summary(output_file, blast_type):
     cmd = 'seqkit fx2tab ' + output_file + ' > ' + output_file + '.tab'
     os.system(cmd)
 
-    tab_df = pd.read_csv(output_file + '.tab', sep='\t', names=['assembly_name', 'seq'], index_col=False)
-    split_names = tab_df['assembly_name'].str.rsplit(n=4, expand=True)
-    tab_df[['subject_id', 'subject_file', 'query_id','alignment_coverage','alignment_identity']] = split_names
-    if blast_type == 'blastp' or blast_type == 'tblastn':
-        tab_df['is_pseudo'] = tab_df['seq'].apply(is_pseudo_sequence)
-    tab_df.to_csv(output_file + "_SUM" + ".csv")
-    tab_df.to_pickle(output_file + "_SUM" + ".pickle")
-    return tab_df
-
-
-
-### quick_see module is use to analysis the _sum.csv, summarized the matched gene distribution
-def quick_see(input, output_file, query_file):
-    df_one_match_each_queryfile = input.groupby(['query_id', 'subject_file'], as_index=False).apply(lambda x: x.sort_values('alignment_identity', ascending=False).iloc[0])
-    result = df_one_match_each_queryfile.groupby(['query_id','seq'])['is_pseudo'].apply(lambda x: x.value_counts()).reset_index(name='count')
-    
     try:
         subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
     except FileNotFoundError:
@@ -228,16 +213,68 @@ def quick_see(input, output_file, query_file):
 
     cmd = 'seqkit fx2tab ' + query_file + ' > ' + output_file + '_query_file.tab'
     os.system(cmd)
-    query_df = pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)
-    result_merge = query_df.merge(result, on='query_id', how='outer')
-    result_merge['level_2'].fillna('absent', inplace=True)
-    result_merge.to_csv(output_file+"_quicksee.csv")
-    result_merge.to_pickle(output_file+"_quicksee.pickle")
 
-    T=result_merge.groupby(['query_id','level_2'])['count'].sum().reset_index()
+    tab_df = pd.read_csv(output_file + '.tab', sep='\t', names=['assembly_name', 'seq'], index_col=False)
+    split_names = tab_df['assembly_name'].str.rsplit(n=4, expand=True)
+    tab_df[['subject_id', 'subject_file', 'query_id','alignment_coverage','alignment_identity']] = split_names
+    if blast_type == 'blastp' or blast_type == 'tblastn':
+        tab_df['is_pseudo'] = tab_df['seq'].apply(is_pseudo_sequence)
+
+    query_id_list=pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)['query_id']
+    subject_file_list_raw = glob.glob(os.path.join(reference_folder, '*'))
+    subject_file_list = [os.path.basename(file_path) for file_path in subject_file_list_raw]
+    # filter_list=tab_df['subject_file'].unique()
+    link=list(product(query_id_list,subject_file_list))
+    df_link =  pd.DataFrame(link, columns=['query_id','subject_file'])
+    # print(df_link)
+    tab_df_merge=pd.merge(df_link, tab_df, left_on=['query_id','subject_file'], right_on=['query_id','subject_file'], how='left')
+    # print(tab_df_merge)
+    tab_df_merge['is_pseudo'] = tab_df_merge['is_pseudo'].fillna('Absent')
+    tab_df_merge[['alignment_coverage','alignment_identity']] = tab_df_merge[['alignment_coverage','alignment_identity']].fillna(0)
+    tab_df_merge['seq'].fillna('NO_MATCH', inplace=True)
+
+    tab_df_merge.to_csv(output_file + "_SUM" + ".csv")
+    tab_df_merge.to_pickle(output_file + "_SUM" + ".pickle")
+    return tab_df_merge
+
+
+
+### quick_see module is use to analysis the _sum.csv, summarized the matched gene distribution
+def quick_see(input, output_file, query_file):
+    df_one_match_each_queryfile = input.groupby(['query_id', 'subject_file'], as_index=False).apply(lambda x: x.sort_values('alignment_identity', ascending=False).iloc[0])
+    result = df_one_match_each_queryfile.groupby(['query_id','seq'])['is_pseudo'].apply(lambda x: x.value_counts()).reset_index(name='count')
+    
+    
+    # Add a new column 'mutation' with default value 'pseudo'
+    result['mutation'] = 'Pseudo'
+
+    # Update 'mutation' column where 'level_2' is 'Absent' or 'Intact'
+    result.loc[result['level_2'] == 'Absent', 'mutation'] = 'Absent'
+    result.loc[result['level_2'] == 'Intact', 'mutation'] = 'Intact'
+    
+    result['total_subject_count'] = result.groupby(['query_id'])['count'].transform('sum')
+    result['percentage'] = (result['count'] / result['total_subject_count'])
+    # try:
+    #     subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
+    # except FileNotFoundError:
+    #     print("Error: seqkit is not installed or not found in the system path.")
+    #     print("Please install seqkit to perform sequence analysis.")
+    #     sys.exit(1)
+
+    # cmd = 'seqkit fx2tab ' + query_file + ' > ' + output_file + '_query_file.tab'
+    # os.system(cmd)
+    # query_df = pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)
+    # result_merge = query_df.merge(result, on='query_id', how='outer')
+    # result_merge['level_2'].fillna('absent', inplace=True)
+    result.to_csv(output_file+"_quicksee.csv")
+    result.to_pickle(output_file+"_quicksee.pickle")
+
+    T=result.groupby(['query_id','level_2'])[['count','percentage']].sum().reset_index()
     T.to_csv(output_file+"_quicksee_1.csv")
+    K=result.groupby(['query_id','mutation'])[['count','percentage']].sum().reset_index()
+    K.to_csv(output_file+"_quicksee_2.csv")
 
-    return result_merge
+    return result
 
 
 
@@ -269,7 +306,7 @@ def main():
                       args.blast_type, output_file, args.cutoff_coverage, args.num_threads)
     
     # Generate summary and save it to the output folder
-    tab_df = generate_summary(output_file, args.blast_type)
+    tab_df = generate_summary(output_file, args.blast_type, args.reference_folder,args.query)
     
     print('Xiao_Fei_Robot: Job done!')
 
