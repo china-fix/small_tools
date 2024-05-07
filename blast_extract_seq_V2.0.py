@@ -72,6 +72,8 @@ def parse_arguments():
                         help="Number of threads (CPUs) to use in the BLAST search")
     parser.add_argument('--xiao_dev', default="none", type=str, metavar='advanced_data_analysis',
                         help="Advance data analysis only use by developer, 'none' by default, if you want to use, read the raw code and do the modification by yourself! quick_see; ")
+    parser.add_argument('--bp_tolerance', default=False, type=int, metavar='bp_num',
+                        help="Number of bp tolerance for the aligned aa seq have no stop codon or incorrect start codon, suggest 5-10 aa")
     return parser.parse_args()
 
 def perform_blast(query, reference, blast_type, num_threads):
@@ -99,11 +101,21 @@ def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, 
                     with open(reference_file, 'r') as ref_file:
                         for seq_record in SeqIO.parse(ref_file, 'fasta'):
                             if seq_record.id == alignment.hit_id:
-                                matched_seq = (blast_record.query, SeqRecord(seq_record.seq, id=alignment.hit_def, description=(reference_name + " " + query + " " + str(alignment_coverage)+ " " + str(alignment_identity))))
+                                matched_seq = (blast_record.query, SeqRecord(seq_record.seq, id=alignment.hit_def, description=(reference_name + " " + 
+                                                                                                                                query + " " + 
+                                                                                                                                str(alignment_coverage)+ " " + 
+                                                                                                                                str(alignment_identity)+ " " +
+                                                                                                                                str(hsp.align_length) + " " +
+                                                                                                                                str(query_length))))
                                 matched_seqs.append(matched_seq)
                                 break
                 else:
-                    matched_seq = (blast_record.query, SeqRecord(Seq(hsp.sbjct), id=alignment.hit_def, description=(reference_name + " " + query+ " " + str(alignment_coverage)+ " " + str(alignment_identity))))
+                    matched_seq = (blast_record.query, SeqRecord(Seq(hsp.sbjct), id=alignment.hit_def, description=(reference_name + " " + 
+                                                                                                                                query + " " + 
+                                                                                                                                str(alignment_coverage)+ " " + 
+                                                                                                                                str(alignment_identity)+ " " +
+                                                                                                                                str(hsp.align_length) + " " +
+                                                                                                                                str(query_length))))
                     matched_seqs.append(matched_seq)
     return matched_seqs
 
@@ -194,7 +206,7 @@ def is_pseudo_sequence(aligned_sequence):
     return pseudo_status
 
 
-def generate_summary(output_file, blast_type, reference_folder,query_file):
+def generate_summary(output_file, blast_type, reference_folder,query_file, bp_tolerance):
     try:
         subprocess.run(["seqkit", "version"], check=True, stdout=subprocess.PIPE)
     except FileNotFoundError:
@@ -216,8 +228,8 @@ def generate_summary(output_file, blast_type, reference_folder,query_file):
     os.system(cmd)
 
     tab_df = pd.read_csv(output_file + '.tab', sep='\t', names=['assembly_name', 'seq'], index_col=False)
-    split_names = tab_df['assembly_name'].str.rsplit(n=4, expand=True)
-    tab_df[['subject_id', 'subject_file', 'query_id','alignment_coverage','alignment_identity']] = split_names
+    split_names = tab_df['assembly_name'].str.rsplit(n=6, expand=True)
+    tab_df[['subject_id', 'subject_file', 'query_id','alignment_coverage','alignment_identity','align_length','query_length']] = split_names
     if blast_type == 'blastp' or blast_type == 'tblastn':
         tab_df['is_pseudo'] = tab_df['seq'].apply(is_pseudo_sequence)
 
@@ -234,8 +246,23 @@ def generate_summary(output_file, blast_type, reference_folder,query_file):
     tab_df_merge[['alignment_coverage','alignment_identity']] = tab_df_merge[['alignment_coverage','alignment_identity']].fillna(0)
     tab_df_merge['seq'].fillna('NO_MATCH', inplace=True)
 
+    # tab_df_merge.to_csv(output_file + "_SUM" + ".csv")
+    # tab_df_merge.to_pickle(output_file + "_SUM" + ".pickle")
+
+    ## steps added 2024-05-07
+    if bp_tolerance:
+        print("Hey xiao, bp tolerance mode is on, you set bp(aa) is "+str(bp_tolerance))
+        tab_df_merge[['alignment_coverage','query_length','align_length']] = tab_df_merge[['alignment_coverage','query_length','align_length']].astype(float)
+        # Add a new column using pd.query
+        tab_df_merge['length_difference'] = tab_df_merge.query('query_length.notna() and align_length.notna()')['query_length'] - tab_df_merge.query('query_length.notna() and align_length.notna()')['align_length']
+        # Filter rows where conditions are met
+        filtered_rows = tab_df_merge.query('(length_difference < 20) and (is_pseudo.isin(["no_stop_codon", "incorrect_start_codon"]))')
+        # Update 'is_pseudo' column for filtered rows to be 'Intact'
+        tab_df_merge.loc[filtered_rows.index, 'is_pseudo'] = 'Intact'
+        
     tab_df_merge.to_csv(output_file + "_SUM" + ".csv")
     tab_df_merge.to_pickle(output_file + "_SUM" + ".pickle")
+
     return tab_df_merge
 
 
@@ -306,7 +333,7 @@ def main():
                       args.blast_type, output_file, args.cutoff_coverage, args.num_threads)
     
     # Generate summary and save it to the output folder
-    tab_df = generate_summary(output_file, args.blast_type, args.reference_folder,args.query)
+    tab_df = generate_summary(output_file, args.blast_type, args.reference_folder,args.query,bp_tolerance=args.bp_tolerance)
     
     print('Xiao_Fei_Robot: Job done!')
 
