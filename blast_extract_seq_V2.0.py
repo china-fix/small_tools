@@ -29,30 +29,49 @@ from itertools import product
 
 
 def setup_logger(log_file):
-    # Create logger
+    # Create logger for file logging
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
 
-    # Create console handler and set level to INFO
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-
-    # Create file handler and set level to INFO
+    # Create file handler for file logging and set level to INFO
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
 
     # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
-    # Add formatter to console handler and file handler
-    console_handler.setFormatter(formatter)
+    # Add formatter to file handler
     file_handler.setFormatter(formatter)
 
-    # Add console handler and file handler to logger
-    logger.addHandler(console_handler)
+    # Add file handler to logger
     logger.addHandler(file_handler)
 
-    return logger
+    # Create logger for screen output
+    screen_logger = logging.getLogger('screen_output')
+    screen_logger.setLevel(logging.INFO)
+
+    # Create console handler for screen output and set level to INFO
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+
+    # Add formatter to console handler
+    console_handler.setFormatter(formatter)
+
+    # Add console handler to screen logger
+    screen_logger.addHandler(console_handler)
+
+    # Create file handler for screen output and set level to INFO
+    screen_file_handler = logging.FileHandler(log_file)
+    screen_file_handler.setLevel(logging.INFO)
+
+    # Add formatter to screen file handler
+    screen_file_handler.setFormatter(formatter)
+
+    # Add screen file handler to screen logger
+    screen_logger.addHandler(screen_file_handler)
+
+    return logger, screen_logger
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Xiao_Fei_Robot: Local BLAST and Sequence Analysis Tool")
@@ -60,9 +79,9 @@ def parse_arguments():
                         help="Query FASTA filename to blast")
     parser.add_argument('--reference_folder', required=True, type=str, metavar='FOLDER',
                         help="Folder containing reference genomes for blasting")
-    parser.add_argument('--cutoff_identity', default=0.6, type=float, metavar='DEFAULT 0.60',
+    parser.add_argument('--cutoff_identity', default=0.7, type=float, metavar='DEFAULT 0.70',
                         help="Minimum similarity value to classify as a match")
-    parser.add_argument('--cutoff_coverage', default=0.75, type=float, metavar='DEFAULT 0.75',
+    parser.add_argument('--cutoff_coverage', default=0.8, type=float, metavar='DEFAULT 0.80',
                         help="Minimum coverage value to classify as a match")
     parser.add_argument('--blast_type', default="blastn", type=str, metavar='COMMAND',
                         help="Blast command name, either 'blastn' (default) or 'tblastn' or 'blastp'")
@@ -72,6 +91,8 @@ def parse_arguments():
                         help="Number of threads (CPUs) to use in the BLAST search")
     parser.add_argument('--xiao_dev', default="none", type=str, metavar='advanced_data_analysis',
                         help="Advance data analysis only use by developer, 'none' by default, if you want to use, read the raw code and do the modification by yourself! quick_see; ")
+    parser.add_argument('--xiao_dev_input', default=False, type=str, metavar='advanced_data_analysis_input',
+                        help="extra data for advance data analysis, only use by developer, False by default, if you want to use, read the raw code and do the modification by yourself! ")
     parser.add_argument('--bp_tolerance', default=False, type=int, metavar='bp_num',
                         help="Number of bp tolerance for the aligned aa seq have no stop codon or incorrect start codon, suggest 5-10 aa")
     return parser.parse_args()
@@ -303,6 +324,31 @@ def quick_see(input, output_file):
 
     return result
 
+    
+def quick_see_plus(result_in,sublist,output_file):
+    with open(sublist, 'r') as file:
+        # Read lines into a list
+        lines = [line.strip() for line in file.readlines()]
+    result =result_in[result_in['query_id'].isin(lines)]
+    result.to_csv(output_file+"_quicksee_plus.csv")
+    result.to_pickle(output_file+"_quicksee_plus.pickle")
+
+
+    T=result.groupby(['query_id','level_2'])[['count','percentage']].sum().reset_index()
+    T.to_csv(output_file+"_quicksee_plus_1.csv")
+
+    K=result.groupby(['query_id','mutation'])[['count','percentage']].sum().reset_index()
+    query_id =K['query_id'].unique()
+    mutation =['Absent','Pseudo','Intact']
+    link=list(product(query_id,mutation))
+    df_link =  pd.DataFrame(link, columns=['query_id','mutation'])
+    new_K= pd.merge(df_link,K, on=['query_id','mutation'], how='left')
+    new_K.fillna(0, inplace=True)
+
+    new_K.to_csv(output_file+"_quicksee_plus_2.csv")
+    return result
+    
+
 
 
 def main():
@@ -321,11 +367,13 @@ def main():
     log_file = os.path.join(output_folder, "logfile.txt")
     
     # Setup logger to output to both console and file
-    logger = setup_logger(log_file)
+    logger, screen_logger = setup_logger(log_file)
 
    # Log the command used
     command_used = " ".join(sys.argv)
     logger.info("Command used: %s", command_used)
+    # Log screen information
+    screen_logger.info("Starting script execution...")
 
 
     # Perform BLAST search and analysis
@@ -342,6 +390,11 @@ def main():
         if args.xiao_dev == 'quick_see':
             print("run quick_see module now!")
             quick_see(tab_df, output_file)
+        elif args.xiao_dev == 'quick_see_plus':
+            print("run quick_see module now!")
+            resultin=quick_see(tab_df, output_file)
+            print("run quick_see_plus module now!")
+            quick_see_plus(result_in=resultin, sublist=args.xiao_dev_input, output_file=output_file)
         else:
             print("hey xiao, no match to you advance function!")
     print('THE END')
