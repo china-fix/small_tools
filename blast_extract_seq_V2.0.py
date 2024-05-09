@@ -303,6 +303,18 @@ def quick_see(input, output_file):
     
     result['total_subject_count'] = result.groupby(['query_id'])['count'].transform('sum')
     result['percentage'] = (result['count'] / result['total_subject_count'])
+
+    # Function to calculate mutation_score based on mutation type
+    def calculate_mutation_score(row):
+        if row['mutation'] == 'Pseudo':
+            return row['percentage'] * 0.5
+        elif row['mutation'] == 'Intact':
+            return row['percentage'] * 1
+        elif row['mutation'] == 'Absent':
+            return row['percentage'] * 0
+    # Apply the function to create the new column 'mutation_score'
+    result['mutation_score'] = result.apply(calculate_mutation_score, axis=1)
+
     
     result.to_csv(output_file+"_quicksee.csv")
     result.to_pickle(output_file+"_quicksee.pickle")
@@ -319,12 +331,14 @@ def quick_see(input, output_file):
     df_link =  pd.DataFrame(link, columns=['query_id','mutation'])
     new_K= pd.merge(df_link,K, on=['query_id','mutation'], how='left')
     new_K.fillna(0, inplace=True)
-
     new_K.to_csv(output_file+"_quicksee_2.csv")
+
+    F=result.groupby('query_id')[['count','mutation_score']].sum().reset_index()
+    F.to_csv(output_file+"_quicksee_3.csv")
 
     return result
 
-    
+ # get a subset of quicksee use the sublist   
 def quick_see_plus(result_in,sublist,output_file):
     with open(sublist, 'r') as file:
         # Read lines into a list
@@ -344,8 +358,11 @@ def quick_see_plus(result_in,sublist,output_file):
     df_link =  pd.DataFrame(link, columns=['query_id','mutation'])
     new_K= pd.merge(df_link,K, on=['query_id','mutation'], how='left')
     new_K.fillna(0, inplace=True)
-
     new_K.to_csv(output_file+"_quicksee_plus_2.csv")
+
+    F=result.groupby('query_id')[['count','mutation_score']].sum().reset_index()
+    F.to_csv(output_file+"_quicksee_plus_3.csv")
+
     return result
     
 
