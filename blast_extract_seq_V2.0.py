@@ -10,6 +10,7 @@ This robot can help to locally blast the query to the reference genomes and extr
 
 *********20240501---major upgrade, add more blast functions, and csv summary file for further data analaysis***********
 20240501---update to add multiprocessing to hugely improve the running speed!
+20240509---update the function relate to blastn up cut
 '''
 
 
@@ -83,8 +84,8 @@ def parse_arguments():
                         help="Minimum similarity value to classify as a match")
     parser.add_argument('--cutoff_coverage', default=0.8, type=float, metavar='DEFAULT 0.80',
                         help="Minimum coverage value to classify as a match")
-    parser.add_argument('--blast_type', default="blastn", type=str, metavar='COMMAND',
-                        help="Blast command name, either 'blastn' (default) or 'tblastn' or 'blastp'")
+    parser.add_argument('--blast_type', default="tblastn", type=str, metavar='COMMAND',
+                        help="Blast command name, either 'tblastn' (default) or 'blastn' (this is for up cut) or 'blastp'")
     parser.add_argument('--output', default="DEFAULT_NAME", type=str, metavar='OUTPUT_FOLDER',
                         help="Output folder name, 'DEFAULT_NAME' by default")
     parser.add_argument('--num_threads', default=4, type=int, metavar='4',
@@ -107,7 +108,7 @@ def perform_blast(query, reference, blast_type, num_threads):
     blast_xml = io.BytesIO(blast_result.stdout)
     return blast_xml
 
-def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, is_protein=False, reference_file=None):
+def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, blast_type, reference_file=None):
     matched_seqs = []
     blast_records = NCBIXML.parse(blast_xml)
     for blast_record in blast_records:
@@ -118,7 +119,7 @@ def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, 
             alignment_coverage = hsp.align_length / query_length
             alignment_identity =hsp.identities / query_length
             if (alignment_identity  >= cutoff) and (alignment_coverage >= coverage_cutoff): #and hsp.expect <= 1e-4:
-                if is_protein:
+                if blast_type == 'blastp':
                     with open(reference_file, 'r') as ref_file:
                         for seq_record in SeqIO.parse(ref_file, 'fasta'):
                             if seq_record.id == alignment.hit_id:
@@ -130,7 +131,7 @@ def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, 
                                                                                                                                 str(query_length))))
                                 matched_seqs.append(matched_seq)
                                 break
-                else:
+                elif blast_type == 'tblastn':
                     matched_seq = (blast_record.query, SeqRecord(Seq(hsp.sbjct), id=alignment.hit_def, description=(reference_name + " " + 
                                                                                                                                 query + " " + 
                                                                                                                                 str(alignment_coverage)+ " " + 
@@ -138,6 +139,35 @@ def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, 
                                                                                                                                 str(hsp.align_length) + " " +
                                                                                                                                 str(query_length))))
                     matched_seqs.append(matched_seq)
+                ##else is for blastn runing in upstream cut mode
+                else:
+                    with open(reference_file, 'r') as ref_file:
+                        for seq_record in SeqIO.parse(ref_file, 'fasta'):
+                            if seq_record.id == alignment.hit_id:
+                                # Calculate the start and end positions of the upstream region
+                                # based on the strand direction of the subject sequence
+                                upstream_length = 100
+                                if hsp.sbjct_start - hsp.sbjct_end <=0:  # Positive strand
+                                    upstream_start = max(0, hsp.sbjct_start - upstream_length) 
+                                    upstream_end = hsp.sbjct_start
+                                    upstream_seq = seq_record.seq[upstream_start-1:upstream_end-1]
+                                else:  # Negative strand
+                                    upstream_start = min(len(seq_record.seq), hsp.sbjct_start + upstream_length)
+                                    upstream_end = hsp.sbjct_start
+                                    upstream_seq = seq_record.seq[upstream_end-1:upstream_start-1].reverse_complement()
+                                # Extract the upstream sequence from the subject sequence
+
+
+
+                                
+                                matched_seq = (blast_record.query, SeqRecord(Seq(upstream_seq), id=alignment.hit_def, description=(reference_name + " " + 
+                                                                                                                                query + " " + 
+                                                                                                                                str(alignment_coverage)+ " " + 
+                                                                                                                                str(alignment_identity)+ " " +
+                                                                                                                                str(hsp.align_length) + " " +
+                                                                                                                                str(query_length))))
+                                matched_seqs.append(matched_seq)
+                                break
     return matched_seqs
 
 
@@ -176,9 +206,8 @@ import multiprocessing
 from functools import partial  # Add this import statement
 def process_reference(reference_file, query_file, cutoff, blast_type, coverage_cutoff, num_threads, matched_seqs):
     reference_name = os.path.basename(reference_file)
-    blast_xml = perform_blast(query_file, reference_file, blast_type, num_threads)
-    is_protein = (blast_type == 'blastp')
-    matched_seqs_partial = filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, is_protein, reference_file)
+    blast_xml = perform_blast(query_file, reference_file, blast_type, num_threads)  
+    matched_seqs_partial = filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, blast_type, reference_file)
     matched_seqs.extend(matched_seqs_partial)
 
 def blast_and_extract(query_file, reference_folder, cutoff, blast_type, output_file, coverage_cutoff, num_threads):
@@ -253,6 +282,10 @@ def generate_summary(output_file, blast_type, reference_folder,query_file, bp_to
     tab_df[['subject_id', 'subject_file', 'query_id','alignment_coverage','alignment_identity','align_length','query_length']] = split_names
     if blast_type == 'blastp' or blast_type == 'tblastn':
         tab_df['is_pseudo'] = tab_df['seq'].apply(is_pseudo_sequence)
+    else:
+        tab_df['is_pseudo'] = 'NO_NEED'
+        
+        
 
     query_id_list=pd.read_csv(output_file + '_query_file.tab', sep='\t',names=['query_id','query_seq'],index_col=False)['query_id']
     subject_file_list_raw = glob.glob(os.path.join(reference_folder, '*'))
