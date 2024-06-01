@@ -80,7 +80,7 @@ def parse_arguments():
                         help="Query FASTA filename to blast")
     parser.add_argument('--reference_folder', required=True, type=str, metavar='FOLDER',
                         help="Folder containing reference genomes for blasting")
-    parser.add_argument('--cutoff_identity', default=0.7, type=float, metavar='DEFAULT 0.70',
+    parser.add_argument('--cutoff_identity', default=0.8, type=float, metavar='DEFAULT 0.80',
                         help="Minimum similarity value to classify as a match")
     parser.add_argument('--cutoff_coverage', default=0.8, type=float, metavar='DEFAULT 0.80',
                         help="Minimum coverage value to classify as a match")
@@ -117,7 +117,7 @@ def filter_matches_combined(cutoff, blast_xml, reference_name, coverage_cutoff, 
         for alignment in blast_record.alignments:
             hsp = alignment.hsps[0]
             alignment_coverage = hsp.align_length / query_length
-            alignment_identity =hsp.identities / query_length
+            alignment_identity =hsp.identities / hsp.align_length
             if (alignment_identity  >= cutoff) and (alignment_coverage >= coverage_cutoff): #and hsp.expect <= 1e-4:
                 if blast_type == 'blastp':
                     with open(reference_file, 'r') as ref_file:
