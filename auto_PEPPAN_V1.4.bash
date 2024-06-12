@@ -1,32 +1,59 @@
 #!/bin/bash
 
-# Remove existing directories if they exist
-rm -rf prokka_ann
-rm -rf PEPPAN_working
-rm -rf wash_input
-
-# Get the starting directory
+# Set starting directory and necessary paths
 start_dir=$(pwd)
+gffs_path="$start_dir/PEPPAN_working/gffs"
+prokka_ann_out="$start_dir/prokka_ann"
 
-# Create necessary directories
-mkdir -p prokka_ann
-mkdir -p PEPPAN_working/gffs
-mkdir -p wash_input
+# Function to rename contig names in input files
+rename_contigs() {
+    local file=$1
+    local output_file=${file%.fasta}_renamed.fasta
 
-# Rename contig names in the fasta files in the "input" directory
-ls input/ | parallel --verbose -j 40 "awk '/^>/ {print \">contig_\" ++i; next} {print}' input/{} > wash_input/{}"
+    awk '/^>/ {print \">contig_\" ++i; next} {print}' "$file" > "$output_file"
+}
 
-# Run Prokka on the fasta files in the "wash_input" directory
-ls wash_input/ | parallel --verbose -j 40 "prokka --prefix {} --compliant --rfam --cpus 6 --outdir $start_dir/prokka_ann/{} wash_input/{}"
+# Function to run Prokka on input files
+run_prokka() {
+    local file=$1
+    local out_prefix=${file%.*}
+    local out_dir="$prokka_ann_out/$out_prefix"
 
-# Copy GFF files to the "PEPPAN_working/gffs" directory
-ls wash_input/ | parallel --verbose -j 40 "cp $start_dir/prokka_ann/{}/{}.gff $start_dir/PEPPAN_working/gffs/"
+    prokka --prefix $out_prefix --compliant --rfam --cpus 6 --outdir "$out_dir" "$start_dir/input/$file"
+}
 
-# Change directory to "PEPPAN_working"
-cd $start_dir/PEPPAN_working
+# Function to run PEPPAN on input files
+run_peppan() {
+    local file=$1
 
-# Run PEPPAN on the GFF files
-PEPPAN -p OUT $start_dir/PEPPAN_working/gffs/*.gff -t 50
+    # Run PEPPAN with appropriate parameters and time limit
+    PEPPAN -p OUT "$gffs_path/$file" -t 50 &
+    
+    # Wait for the child process (PEPPAN) to complete before continuing
+    wait $!
+}
 
-# Run PEPPAN_parser on the output GFF file
-PEPPAN_parser -g $start_dir/PEPPAN_working/OUT.PEPPAN.gff -p PAR_OUT -t -a 98 -c
+# Function to run PEPPAN_parser on input file
+run_peppan_parser() {
+    local gff_file=$1
+    local out_gff="${gff_file%.gff}_parsed.gff"
+    local out_path="$start_dir/PEPPAN_working/PAR_OUT"
+
+    PEPPAN_parser -g "$gff_file" -p "$out_path" -t -a 98 -c > "$out_gff"
+}
+
+# Rename contig names in input files and store results
+rename_contigs input/*
+parallel --jobs 40 "cat {} | rename_contigs.sh" wash_input/*.fasta
+
+# Run Prokka on renamed files
+run_prokka $(ls wash_input/*_renamed.fasta)
+
+# Move GFF files to PEPPAN_working/gffs directory and run PEPPAN
+mv wash_input/*.gff "$gffs_path"
+for file in $gffs_path/*.gff; do
+    run_peppan "$file"
+done
+
+# Run PEPPAN_parser on output files from previous step
+run_peppan_parser $(ls "$gffs_path"/*)
